@@ -15,7 +15,7 @@ HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}"
 }
 
-# Generic HF API request handler
+# Hugging Face API caller
 def query_hf(model: str, inputs: str):
     url = f"https://api-inference.huggingface.co/models/{model}"
     payload = {"inputs": inputs}
@@ -25,7 +25,7 @@ def query_hf(model: str, inputs: str):
     except Exception:
         return {"error": "Invalid JSON response", "raw": response.text}
 
-# Input data models
+# Input models
 class Turn(BaseModel):
     speaker: str
     text: str
@@ -33,33 +33,42 @@ class Turn(BaseModel):
 class Transcript(BaseModel):
     transcript: List[Turn]
 
-# Main analysis endpoint
+# Main endpoint
 @app.post("/analyze")
 async def analyze_call(data: Transcript):
     try:
         turns = data.transcript
         dialogue = "\n".join([f"{t.speaker}: {t.text}" for t in turns])
-        
-        # Summarization
+
+        # 🔎 Summarization
         summary_response = query_hf(SUMMARY_MODEL, dialogue)
         if isinstance(summary_response, list) and "summary_text" in summary_response[0]:
             summary_text = summary_response[0]["summary_text"]
         else:
             return {"error": "Summarization failed", "details": summary_response}
 
-        # Sentiment analysis for each turn
+        # 🧠 Sentiment analysis
         sentiment_results = []
         for turn in turns:
             sentiment_raw = query_hf(SENTIMENT_MODEL, turn.text)
-            if isinstance(sentiment_raw, list) and "label" in sentiment_raw[0]:
-                top = sentiment_raw[0]
+
+            try:
+                top_label = None
+                top_score = 0.0
+                if isinstance(sentiment_raw, list):
+                    raw = sentiment_raw[0] if isinstance(sentiment_raw[0], list) else sentiment_raw
+                    top = max(raw, key=lambda x: x["score"])
+                    top_label = top["label"]
+                    top_score = top["score"]
+
                 sentiment_results.append({
                     "speaker": turn.speaker,
                     "text": turn.text,
-                    "sentiment": top["label"],
-                    "confidence": round(top["score"], 3)
+                    "sentiment": top_label,
+                    "confidence": round(top_score, 3)
                 })
-            else:
+
+            except Exception as e:
                 sentiment_results.append({
                     "speaker": turn.speaker,
                     "text": turn.text,
